@@ -11,163 +11,176 @@ import org.w3c.dom.NodeList;
 import javax.xml.parsers.DocumentBuilder;
 import javax.xml.parsers.DocumentBuilderFactory;
 
+/**
+ * Clase principal del programa de cajeros automáticos
+ * Ejercicio de PSP sobre concurrencia con hilos
+ */
 public class Main {
     public static void main(String[] args) {
-        System.out.println("=== PROGRAMA DE CAJEROS AUTOMÁTICOS CON CONCURRENCIA ===\n");
+        System.out.println("PROGRAMA DE CAJEROS AUTOMÁTICOS CON CONCURRENCIA");
 
-        // Demostración con Thread sin ExecutorService
-        System.out.println("--- DEMOSTRACIÓN CON Thread SIN ExecutorService ---");
-        demostracionConThread();
-
-        System.out.println("\n--- EJECUTAR CON RUNNABLE (10 HILOS) ---");
-        cuentaCrypto cuentaRunnable = new cuentaCrypto(5000);
+        // Ejecutamos con Runnable (10 hilos)
+        System.out.println("EJECUTAR CON RUNNABLE (10 HILOS)");
+        CuentaBancaria cuentaRunnable = new CuentaBancaria(5000);
         ejecutarConRunnable(cuentaRunnable);
 
-        System.out.println("\n--- EJECUTAR CON CALLABLE Y CompletableFuture (10 HILOS) ---");
-        cuentaCrypto cuentaCallable = new cuentaCrypto(5000);
-        ejecutarConCallableYCompletable(cuentaCallable);
-    }// Fin del Main
+        // Ejecutamos con Callable (10 hilos)
+        System.out.println("EJECUTAR CON CALLABLE (10 HILOS)");
+        CuentaBancaria cuentaCallable = new CuentaBancaria(5000);
+        ejecutarConCallable(cuentaCallable);
 
-    /* Demostración con Thread sin ExecutorService */
-    private static void demostracionConThread() {
-        cuentaCrypto cuentaThread = new cuentaCrypto(1000);
-        Thread[] hilos = new Thread[3];
-
-        // Crear hilos manualmente
-        hilos[0] = new Thread(() -> cuentaThread.retirar(100, "ThreadA"));
-        hilos[1] = new Thread(() -> cuentaThread.depositar(200, "ThreadB"));
-        hilos[2] = new Thread(() -> cuentaThread.retirar(50, "ThreadC"));
-
-        // Ejecutar hilos
-        for (Thread hilo : hilos) {
-            hilo.start();
-        }
-
-        // Esperar a que terminen
-        try {
-            for (Thread hilo : hilos) {
-                hilo.join();
-            }
-            System.out.println("Saldo final con Thread: " + cuentaThread.consultarSaldo());
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-        }
+        System.out.println("PROGRAMA FINALIZADO");
     }
 
-    /*
-     * Este método ejecuta 10 hilos con Runnable
+    /**
+     * Método que ejecuta 10 hilos con Runnable
+     * Cada cajero retira o deposita dinero según los números cargados del XML
      */
-    public static void ejecutarConRunnable(cuentaCrypto cuenta) {
+    public static void ejecutarConRunnable(CuentaBancaria cuenta) {
+        // Cargamos los números del XML en una cola
         Queue<Integer> cola = cargarNumeros("Cajero");
+
+        // Creamos un pool de 10 hilos para ejecutar los cajeros
         ExecutorService poolHilos = Executors.newFixedThreadPool(10);
         List<Runnable> cajeros = new ArrayList<>();
 
-        // Crear 10 cajeros
+        System.out.println("Saldo inicial: " + cuenta.consultarSaldo() + " euros\n");
+
+        // Creamos 10 cajeros
         for (int i = 1; i <= 10; i++) {
-            Integer cantidad = cola.poll();
+            Integer cantidad = cola.poll(); // Sacamos un número de la cola
             if (cantidad != null) {
-                boolean robar = i % 2 == 0; // Alternamos entre retirar y depositar
-                cajeros.add(new Cajero(cuenta, "Cajero-" + i, robar, cantidad));
+                // Los pares retiran, los impares depositan
+                boolean esRetirada = i % 2 == 0;
+                cajeros.add(new Cajero(cuenta, "Cajero-" + i, esRetirada, cantidad));
             }
         }
 
-        // Ejecutar todos los cajeros
+        // Ejecutamos todos los cajeros en el pool de hilos
         for (Runnable cajero : cajeros) {
             poolHilos.submit(cajero);
         }
 
+        // Cerramos el pool (no acepta más tareas)
         poolHilos.shutdown();
 
         try {
+            // Esperamos a que todos los hilos terminen (máximo 2 minutos)
             if (poolHilos.awaitTermination(2, TimeUnit.MINUTES)) {
-                System.out.println("Todos los hilos han terminado");
-                System.out.println("Dinero restante en cuenta: " + cuenta.consultarSaldo());
+                System.out.println("\nTodos los hilos han terminado correctamente");
+                System.out.println("================================================");
+                System.out.println("  DINERO RESTANTE EN CUENTA: " + cuenta.consultarSaldo() + " euros");
+                System.out.println("================================================");
             } else {
-                System.out.println("No todos los hilos terminaron en el tiempo límite");
+                System.out.println("Timeout: No todos los hilos terminaron a tiempo");
             }
         } catch (InterruptedException e) {
-            System.err.println("Hilo principal interrumpido");
+            System.err.println("Error: Hilo principal interrumpido");
             Thread.currentThread().interrupt();
         }
     }
 
-    /*
-     * Este método ejecuta 10 hilos con Callable usando CompletableFuture
+    /**
+     * Método que ejecuta 10 hilos con Callable
+     * Callable permite devolver un resultado y capturar excepciones
      */
-    public static void ejecutarConCallableYCompletable(cuentaCrypto cuenta) {
+    public static void ejecutarConCallable(CuentaBancaria cuenta) {
+        // Cargamos los números del XML en una cola
         Queue<Integer> cola = cargarNumeros("Cajero");
-        ExecutorService poolHilos = Executors.newFixedThreadPool(10);
-        List<CompletableFuture<String>> resultados = new ArrayList<>();
 
-        // Crear 10 cajeros con Callable
+        // Creamos un pool de 10 hilos
+        ExecutorService poolHilos = Executors.newFixedThreadPool(10);
+        List<Future<String>> resultados = new ArrayList<>();
+
+        System.out.println("Saldo inicial: " + cuenta.consultarSaldo() + " euros\n");
+
+        // Creamos 10 cajeros con Callable
         for (int i = 1; i <= 10; i++) {
             Integer cantidad = cola.poll();
             if (cantidad != null) {
-                boolean robar = i % 2 == 0;
+                // Los pares retiran, los impares depositan
+                boolean esRetirada = i % 2 == 0;
                 String nombre = "Cajero-" + i;
 
-                // Convertir Callable a CompletableFuture
-                CompletableFuture<String> futuro = CompletableFuture.supplyAsync(() -> {
-                    try {
-                        return new CajeroCallable(cuenta, nombre, robar, cantidad).call();
-                    } catch (Exception e) {
-                        return "Error en " + nombre + ": " + e.getMessage();
-                    }
-                }, poolHilos);
-
+                // Creamos el cajero callable y lo enviamos al pool
+                CajeroCallable cajero = new CajeroCallable(cuenta, nombre, esRetirada, cantidad);
+                // Hacemos cast a Callable para que Java sepa qué método submit usar
+                Future<String> futuro = poolHilos.submit((Callable<String>) cajero);
                 resultados.add(futuro);
             }
         }
 
-        // Combinar todos los CompletableFuture
-        CompletableFuture<Void> todosCombinados = CompletableFuture.allOf(
-                resultados.toArray(new CompletableFuture[0]));
+        // Cerramos el pool
+        poolHilos.shutdown();
 
         try {
-            // Esperar a que todos terminen (con timeout de 2 minutos)
-            todosCombinados.orTimeout(2, TimeUnit.MINUTES).join();
+            // Esperamos a que todos terminen
+            if (poolHilos.awaitTermination(2, TimeUnit.MINUTES)) {
+                System.out.println("\nTodos los hilos han terminado correctamente");
+                System.out.println("\n================================================");
+                System.out.println("  RESULTADOS DE LAS OPERACIONES:");
+                System.out.println("================================================");
 
-            System.out.println("Todos los hilos han terminado");
-            System.out.println("\nResultados de las operaciones:");
-            for (int i = 0; i < resultados.size(); i++) {
-                CompletableFuture<String> futuro = resultados.get(i);
-                System.out.println("  [" + (i + 1) + "] " + futuro.getNow("Pendiente"));
+                // Mostramos los resultados de cada operación
+                for (int i = 0; i < resultados.size(); i++) {
+                    Future<String> futuro = resultados.get(i);
+                    System.out.println("  [" + (i + 1) + "] " + futuro.get());
+                }
+
+                System.out.println("\n================================================");
+                System.out.println("  DINERO RESTANTE EN CUENTA: " + cuenta.consultarSaldo() + " euros");
+                System.out.println("================================================");
+
+            } else {
+                System.out.println("Timeout: No todos los hilos terminaron a tiempo");
             }
-            System.out.println("\nDinero restante en cuenta: " + cuenta.consultarSaldo());
-
-        } catch (CompletionException e) {
-            System.out.println("Error durante la ejecución: " + e.getMessage());
-        } finally {
-            poolHilos.shutdown();
+        } catch (InterruptedException | ExecutionException e) {
+            System.err.println("Error durante la ejecución: " + e.getMessage());
+            Thread.currentThread().interrupt();
         }
     }
 
-    /* Método que carga números según la primera letra del nombre del cajero */
+    /**
+     * Método que carga los números del XML en una cola
+     * Según la primera letra del nombre, carga diferentes tipos de números:
+     * - A-I: Números de Fibonacci
+     * - J-Q: Números primos
+     * - R-Z: Números aleatorios
+     * nombreCajero El nombre del cajero (para saber qué números cargar)
+     * Devuelve una cola con los números cargados
+     */
     public static Queue<Integer> cargarNumeros(String nombreCajero) {
         Queue<Integer> cola = new ArrayDeque<>();
 
         try {
+            // Leemos el archivo XML
             File archivoXML = new File("src/main/resources/numeros.xml");
             DocumentBuilderFactory factory = DocumentBuilderFactory.newInstance();
             DocumentBuilder builder = factory.newDocumentBuilder();
             Document documento = builder.parse(archivoXML);
 
+            // Normalizamos el documento
             documento.getDocumentElement().normalize();
 
             String etiqueta = "";
             char primeraLetra = Character.toUpperCase(nombreCajero.charAt(0));
 
-            // Determinar qué números cargar según la primera letra
+            // Determinamos qué números cargar según la primera letra del nombre
             if (primeraLetra >= 'A' && primeraLetra <= 'I') {
                 etiqueta = "fibonacci";
+                System.out.println("Tu nombre empieza por '" + primeraLetra + "' (A-I): Cargando números de Fibonacci");
             } else if (primeraLetra >= 'J' && primeraLetra <= 'Q') {
                 etiqueta = "primos";
+                System.out.println("Tu nombre empieza por '" + primeraLetra + "' (J-Q): Cargando números primos");
             } else if (primeraLetra >= 'R' && primeraLetra <= 'Z') {
                 etiqueta = "aleatorios";
+                System.out.println("Tu nombre empieza por '" + primeraLetra + "' (R-Z): Cargando números aleatorios");
             } else {
-                etiqueta = "fibonacci"; // Default
+                etiqueta = "fibonacci"; // Por defecto
+                System.out.println("Letra no reconocida, usando Fibonacci por defecto");
             }
 
+            // Buscamos la etiqueta en el XML
             NodeList listaNumeros = documento.getElementsByTagName(etiqueta);
 
             if (listaNumeros.getLength() > 0) {
@@ -175,15 +188,17 @@ public class Main {
                 String contenido = elemento.getTextContent();
                 String[] numeros = contenido.split(",");
 
+                // Añadimos los números a la cola
                 for (String num : numeros) {
                     cola.offer(Integer.parseInt(num.trim()));
                 }
             }
 
         } catch (Exception e) {
+            System.err.println("Error al cargar el XML: " + e.getMessage());
             e.printStackTrace();
         }
 
         return cola;
-    }// Fin cargarNumeros
+    }
 }
